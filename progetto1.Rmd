@@ -1,0 +1,914 @@
+---
+title: "I soldi fanno la felicità??"
+author: "Cristina Giulia Montalto"
+output:
+  html_document:
+    toc: TRUE 
+    toc_float: TRUE
+    theme: united
+    highlight: textmate
+    
+---
+<style>
+body {
+text-align: justify}
+
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, eval=TRUE, cache=TRUE, message=FALSE, warning=FALSE, fig.align='center')
+```
+
+I datasets in esame contengono informazioni su indicatori rilevati annualmente a livello globale che hanno lo scopo di descrivere la situazione sanitaria, lavorativa, economica, sociale nei vari Paesi nel tempo.
+
+I datasets sono i seguenti:
+
+* JobsCountry contiene una lista di Paesi per i quali sono stati rilevate le informazioni
+
+* JobsSeries contiene una lista di indicatori 
+
+* JobsData contiene i valori degli indicatori nei vari anni e nei vari Paesi
+
+* Human development index (HDI) riporta i valori dell'indicatore HDI (funzione dell'aspettativa di vita alla nascita, degli anni medi di istruzione, anni previsti di istruzione e una misura del PIL pro capite)
+
+* continents-country collega gli Stati al continente di appartenenza
+ 
+* WHR2016 riporta i valori di alcuni indicatori riguardanti il livello di felicit? della popolazione e di altri simili indicatori
+
+Fonte: https://data.worldbank.org/ ; http://hdr.undp.org/en/data#; https://ourworldindata.org/grapher/continents-according-to-our-world-in-data?overlay=data; http://worldhappiness.report/
+
+L'obiettivo dell'analisi è indagare sulla natura delle relazioni che legano aspetti economici, lavorativi, sociali e sanitari dei vari Paesi e analizzare la loro evoluzione nel tempo. In particolare, si vuole capire se esiste una relazione tra variabili economiche che misurano la ricchezza di un Paese, variabili che servono a misurare il livello di benessere della popolazione di quel Paese, come l'HDI (Human Development Index) e variabili che ne misurano la felicità e le emozioni positive.
+Dato il grande numero di indicatori a disposizione, è stata necessaria una selezione di quelli ritenuti più rilevanti.
+
+
+```{r, echo = FALSE}
+#Caricamento delle librerie
+library(dbplyr)
+library(tidyverse)
+library(readxl)
+library(readr)
+library(plotly)
+library(ggplot2)
+library(modelr)
+library(purrr)
+library(broom)
+library(corrr)
+library(corrplot)
+
+```
+
+```{r, echo = FALSE}
+#Importazione dei dati
+JobsData <- read_csv("JobsData.csv")
+JobsCountry <- read_excel("JobsCountry.xlsx")
+JobsSeries <- read_csv("JobsSeries.csv")
+HDI= read_excel("Human development index (HDI).xls")
+continents_countries= read_csv("continents-according-to-our-world-in-data.csv")
+exp_ed=read_excel("Government expenditure on education, total (% of government expenditure).xls")
+WHR2016 <- read_excel("WHR2016.xlsx")
+
+#di ciascuna tabella, mantengo solo le colonne rilevanti al fine dell'analisi e rinomino le variabili
+JobsSeries=JobsSeries[1:206,c("Series Code","Topic","Indicator Name","Long definition")]
+HDI=HDI[,-1]
+JobsData=JobsData[1:79838,1:32]
+continents_countries=continents_countries[,-3]
+
+exp_ed=exp_ed%>%select(-c(`1960`:`1989`,`2017`))
+exp_ed=exp_ed%>%gather(c(`1990`:`2016`), key="year",value = "values")
+
+WHR2016=WHR2016%>%select(c(`country`,`year`, `Life Ladder`,`Freedom to make life choices`,`Generosity`,`Positive affect`,`Negative affect`))
+HDI=HDI%>%
+  gather(c(`1990`:`2017`), key="year",value = "values")
+
+JobsData=JobsData%>%gather(c(`1990`:`2017`), key="year",value = "values")
+
+colnames(WHR2016)=c("country_name","year","life_ladder","freedom","generosity","positive_affects","negative_affects")
+colnames(JobsData)=c("country_name","country_code","indicator_name","indicator_code","year","values")
+colnames(HDI)=c("country_name","year","values")
+colnames(JobsSeries)=c("indicator_code","topic","indicator_name","long_definition")
+colnames(continents_countries)=c("country_name","country_code","continent")
+colnames(exp_ed)=c("country_name","country_code","indicator_name","indicator_code","year","values")
+
+
+#seleziono solo gli indicatori rilevanti al fine dell'analisi
+JobsSeries=JobsSeries%>%filter(indicator_code=="NY.GDP.MKTP.KD.ZG"|indicator_code=="SI.POV.GINI"|indicator_code=="IS.ROD.DNST.K2"|indicator_code=="IS.VEH.ROAD.K1"|indicator_code=="SL.AGR.EMPL.ZS"|indicator_code=="SL.IND.EMPL.ZS"|indicator_code=="SL.SRV.EMPL.ZS"|indicator_code=="SP.DYN.TFRT.IN"|indicator_code=="NY.GDP.PCAP.KD"|indicator_code=="SE.XPD.TOTL.GD.ZS"|indicator_code=="IT.NET.USER.ZS"|indicator_code=="SL.TLF.CACT.ZS"|indicator_code=="SL.TLF.ADVN.ZS"|indicator_code=="SL.TLF.BASC.ZS"|indicator_code=="SL.TLF.INTM.ZS"|indicator_code=="SL.TLF.TOTL.IN"|indicator_code=="SP.DYN.LE00.FE.IN"|indicator_code=="SP.DYN.LE00.MA.IN"|indicator_code=="SE.ADT.LITR.ZS"|indicator_code=="IT.CEL.SETS.P2"|indicator_code=="SP.POP.TOTL"|indicator_code=="SP.POP.GROW"|indicator_code=="SI.POV.DDAY"|indicator_code=="SP.POP.SCIE.RD.P6"|indicator_code=="SP.RUR.TOTL.ZS"|indicator_code=="SL.EMP.TOTL"|indicator_code=="SL.UEM.ADVN.ZS"|indicator_code=="SL.UEM.INTM.ZS"|indicator_code=="SL.UEM.SECO.ZS"|indicator_code=="SL.UEM.TOTL.ZS"|indicator_code=="SL.UEM.1524.ZS"|indicator_code=="SP.URB.TOTL.IN.ZS")
+
+
+HDI1=HDI
+JobsData1=JobsData
+JobsSeries1=JobsSeries
+JobsCountry1=JobsCountry
+
+
+
+#Elimino le inconsistenze tra i dati scegliendo di condurre l'analisi solo per quei Paesi per i quali è presente il valore per gli indicatori considerati. Inoltre, seleziono solo gli indicaotri rilevanti. 
+JobsCountry=JobsCountry%>%left_join(continents_countries,by=("country_name"))%>%select(-country_code.y)
+colnames(JobsCountry)=c("country_code","country_name","continent")
+WHR2016=WHR2016%>%left_join(JobsCountry)
+WHR2016=WHR2016%>%semi_join(JobsCountry)
+JobsData1=JobsData%>%semi_join(JobsSeries,by=("indicator_code"))
+JobsData1=JobsData1%>%semi_join(JobsCountry,by=("country_code"))
+JobsData1=JobsData1%>%semi_join(HDI, by=("country_name"))
+JobsData1=JobsData1%>%left_join(JobsCountry,by=("country_code"))%>%select(-country_name.y)
+colnames(JobsData1)=c("country_name","country_code","indicator_name","indicator_code","year","values","continent")
+exp_ed=exp_ed%>%left_join(JobsCountry)
+exp_ed=na.omit(exp_ed)
+HDI1=HDI1%>%left_join(JobsCountry)
+
+WHR2016$country_name=as.factor((WHR2016$country_name))
+WHR2016$continent=as.factor(WHR2016$continent)
+WHR2016$country_code=as.factor(WHR2016$country_code)
+
+HDI1$country_name=as.factor((HDI$country_name))
+HDI1$continent=as.factor(HDI1$continent)
+HDI1$values=as.numeric(HDI1$values)
+HDI1$year=as.integer(HDI1$year)
+JobsSeries1$topic=as.factor(JobsSeries$topic)
+JobsCountry1$country_code=as.factor(JobsCountry$country_code)
+JobsCountry1$country_name=as.factor(JobsCountry$country_name)
+JobsData1$country_name =as.factor(JobsData1$country_name)
+JobsData1$country_code =as.factor(JobsData1$country_code)
+JobsData1$indicator_code=as.factor(JobsData1$indicator_code)
+JobsData1$indicator_name=as.factor(JobsData1$indicator_name)
+JobsSeries1$indicator_name=as.factor(JobsSeries1$indicator_name)
+continents_countries$country_name=as.factor(continents_countries$country_name)
+continents_countries$country_code=as.factor(continents_countries$country_code)
+continents_countries$continent=as.factor(continents_countries$continent)
+exp_ed$country_name =as.factor(exp_ed$country_name)
+exp_ed$country_code =as.factor(exp_ed$country_code)
+exp_ed$indicator_code=as.factor(exp_ed$indicator_code)
+exp_ed$indicator_name=as.factor(exp_ed$indicator_name)
+
+```
+
+# Analisi esplorativa
+Verrà condotta un'analisi esplorativa preliminare che ha lo scopo di studiare l'andamento dei vari indicatori nel tempo.
+```{r}
+
+#il numero di indicatori coinvolti nell'analisi e i relativi topics:
+num_indicatori=length(JobsSeries1$indicator_code)
+num_indicatori
+
+num_topic=length(levels(JobsSeries1$topic))
+num_topic
+
+#numero di Paesi considerati:
+num_paesi=length(levels(JobsData1$country_code))
+num_paesi
+
+```
+
+Per misurare il livello di benessere della popolazione, è necessario utilizzare numerosi indicatori al fine di ottenere una misurazione il pi? possibile affidabile. Si ritiene utile creare macrogruppi di indicatori: indicatori che misurano il livello economico, il livello sanitario, il livello educativo e il livello infrastrutturale (comunicazioni, tecnologia, trasporti e urbanizzazione).
+
+```{r, echo = FALSE}
+#Per rilevare il livello di benessere, è utile assegnare gli indicatori a macrocategorie 
+
+JobsSeries1=JobsSeries1%>%
+  mutate(topic_id=fct_recode(topic,
+  "economic_indicators"= "Economic Policy & Debt: National accounts: Growth rates",
+  "economic_indicators"="Economic Policy & Debt: National accounts: US$ at constant 2010 prices: Aggregate indicators",
+  "economic_indicators"="Poverty: Income distribution",
+  "economic_indicators"="Social Protection & Labor: Economic activity",
+  "economic_indicators"="Social Protection & Labor: Labor force structure",
+  "economic_indicators"="Social Protection & Labor: Unemployment",
+  "economic_indicators"="Poverty: Poverty rates",
+  "health_indicators"="Health: Mortality",
+  "health_indicators"="Health: Population: Dynamics",
+  "health_indicators"="Health: Population: Structure",
+  "health_indicators"="Health: Reproductive health",
+  "education_indicators"="Education: Inputs",
+  "education_indicators"="Education: Outcomes",
+  "environment_and_infrastructure_indicators"="Environment: Density & urbanization",
+  "environment_and_infrastructure_indicators"="Infrastructure: Communications",
+  "environment_and_infrastructure_indicators"="Infrastructure: Technology",
+  "environment_and_infrastructure_indicators"="Infrastructure: Transportation"))
+```
+
+```{r}
+indicatori_economici=JobsSeries1%>%group_by(topic_id)%>%filter(topic_id=="economic_indicators")%>%select(topic_id,indicator_name,long_definition)
+indicatori_economici
+
+indicatori_salute=JobsSeries1%>%group_by(topic_id)%>%filter(topic_id=="health_indicators")%>%select(topic_id,indicator_name,long_definition)
+indicatori_salute
+
+indicatori_educazione=JobsSeries1%>%group_by(topic_id)%>%filter(topic_id=="education_indicators")%>%select(topic_id,indicator_name,long_definition)
+indicatori_educazione
+
+indicatori_infra=JobsSeries1%>%group_by(topic_id)%>%filter(topic_id=="environment_and_infrastructure_indicators")%>%select(topic_id,indicator_name,long_definition)
+indicatori_infra
+
+```
+
+## Analisi Benessere economico
+Analizziamo il trend del PIL pro capite e della sua crescita % annua. Alla variabile GDP per capita, ossia il PIL pro capite, è stata applicata una trasformata logaritmica.
+
+```{r}
+GDP=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="NY.GDP.PCAP.KD")
+GDP=na.omit(GDP)
+GDP$year=as.numeric(GDP$year)
+GDP$values=log(GDP$values)
+
+a=ggplot(GDP, aes(year,values, group=country_name))+
+  geom_line()+
+  labs (
+    title="Variazione del log PIL pro capite negli anni",
+    subtitle="constant 2005 US$")+
+ theme(
+   axis.text.x = element_text(angle=45))
+ 
+ggplotly(a)
+```
+
+Dal grafico dell'andamento del PIL pro capite per i vari Paesi negli anni, si evince un trend leggermente positivo per alcuni Paesi, per altri, invece, il trend è pressochè nullo. Passiamo ora ad analizzare il tasso di crescita percentuale di questa grandezza.
+ 
+```{r}
+GDP_grow=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="NY.GDP.MKTP.KD.ZG")
+GDP_grow=na.omit(GDP_grow)
+
+
+a=ggplot(GDP_grow, aes(year,values, group=country_name))+
+  geom_line()+
+  labs (
+    title="Variazione del tasso di crescita del PIL pro capite negli anni")+
+  theme(
+   axis.text.x = element_text(angle=45))
+
+ggplotly(a)
+
+```
+
+Appare chiaro che non tutti i Paesi presentano lo stesso tasso di crescita del PIL pro capite. Per comprendere meglio quali siano i Paesi con un tasso di crescita e un valore del PIL pro capite maggiore, procediamo con l'analisi.
+
+```{r}
+best_GDP= GDP %>%
+     group_by(year) %>%
+     filter(row_number(desc(values))<=3)
+
+ggplot(best_GDP,aes(year,values))+
+  geom_point(aes(color=country_name))+
+  labs(
+    title="Paesi con PIL pro capite maggiore-per Paese")+
+  theme(
+    axis.text.x = element_text(angle=45))
+
+b=ggplot(best_GDP,aes(year,values,group=country_name))+
+  geom_point(aes(color=continent))+
+  labs(
+    title="Paesi con PIL pro capite maggiore- per continente")+
+  theme(
+    axis.text.x = element_text(angle=45))
+
+ggplotly(b)
+
+```
+
+Si nota che i Paesi che hanno un tasso di crescita maggiore non sono quelli che raggiungono i valori più alti di PIL pro capite. 
+
+```{r}
+best_GDP_grow= GDP_grow %>%
+     group_by(year) %>%
+     filter(row_number(desc(values))<=3)
+
+a=ggplot(best_GDP_grow,aes(year,values,group=country_name))+
+  geom_point(aes(color=continent))+
+  labs(
+    title="Paesi maggiore  crescita del PIL pro capite")+
+  theme(
+    axis.text.x = element_text(angle=45))
+
+
+ggplotly(a)
+
+```
+
+Infatti, i Paesi con un tasso di crescita maggiore del PIL pro capite sono principalmente in Asia e in Africa, mentre i Paesi con un livello maggiore di tale sono europei.
+Passiamo ora ad analizzare brevemente altri indicatori economici.
+
+```{r}
+
+gini=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="SI.POV.GINI")
+gini=na.omit(gini)
+
+best_gini= gini %>%
+     group_by(year) %>%
+     filter(values<20)
+
+ggplot(gini,aes(year,values,group=country_name))+
+  geom_point(aes(color=continent))+
+  labs(
+    title="Indice di GINI",
+    subtile="classifica per continente")+
+  theme(
+    axis.text.x = element_text(angle=45))+
+  ggrepel::geom_label_repel(aes(label = country_name), data = best_gini)
+
+```
+
+L'indice di GINI misura la disuguaglianza di una distribuzione e in questo caso misura quanto il reddito si distribuisce in modo diseguale all'interno di un Paese. Valori prossimi a 0 di tale indice indicano distribuzioni perfettamente eque, valori prossimi a 100, invece, indicano distribuzioni totalmente ineguali.
+Dal grafico si evince che, soprattutto dalla fine del secolo scorso, le distribuzioni più eque del reddito sono proprie dei Paesi europei, ad eccezione dell' Azerbaijan, che raggiunge i valori minimi registrati nei primi anni del XXI secolo. I valori maggiori di questo indicatore sono stati raggiunti dai Paesi africani.
+
+```{r}
+disoccupazione=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="SL.UEM.ADVN.ZS"|indicator_code=="SL.UEM.INTM.ZS"|indicator_code=="SL.UEM.SECO.ZS"|indicator_code=="SL.UEM.TOTL.ZS"|indicator_code=="SL.UEM.1524.ZS")
+disoccupazione=na.omit(disoccupazione)
+
+
+disoccupazione_tot=disoccupazione %>%
+     group_by(year) %>%
+     filter(indicator_code=="SL.UEM.TOTL.ZS"  )
+
+
+b=ggplot(disoccupazione_tot,aes(year,values,group=country_name))+
+  geom_point(aes(color=continent))+
+  labs(
+    title="Livello di disoccupazione totale",
+    subtile="classifica per continente")+
+  theme(
+    axis.text.x = element_text(angle=45)
+  )
+
+ggplotly(b)
+```
+
+Per quanto riguarda la disoccupazione, notiamo che i Paesi con valori maggiori al 20% sono africani e europei. Cerchiamo di capire di quali Paesi stiamo parlando:
+
+```{r}
+bad_disoccupazione_tot=disoccupazione_tot%>%group_by(year)%>%filter(values>=25)
+
+c=ggplot(bad_disoccupazione_tot,aes(year,values,group=country_name))+
+  geom_point(aes(color=country_name, shape=continent))+
+  labs(title="Paesi con pi? alta disoccupazione")+
+  theme(
+    axis.text.x = element_text(angle=45)
+  )
+
+ggplotly(c)
+  
+
+```
+
+Il Lesotho è il Paese che riporta negli anni un livello di disoccupazione maggiore. A seguire si posiziona il Monenegro, la Bosnia e altri Paesi europei e africani. 
+Si potrebbe analizzare la disoccupazione più nel dettaglio considerando indicatori di disoccupazione pi? specifici, quali il tasso di disoccupazione per settore, tasso di disoccupazione per titolo di studio, tasso di disoccupazione per fascia di età. 
+
+## Analisi sulla salute
+
+Un buon indicatore per analizzare il livello di salute di una popolazione è l'aspettativa di vita alla nascita.
+
+```{r}
+aspettativa_vita=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="SP.DYN.LE00.FE.IN"|indicator_code=="SP.DYN.LE00.MA.IN")
+aspettativa_vita=na.omit(aspettativa_vita)
+
+aspettativa_m=aspettativa_vita%>%group_by(country_code)%>%filter(indicator_code=="SP.DYN.LE00.MA.IN")
+aspettativa_f=aspettativa_vita%>%group_by(country_code)%>%filter(indicator_code=="SP.DYN.LE00.FE.IN")
+
+a=ggplot(aspettativa_f,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="Aspettativa di vita per le donne")+
+  theme(
+    axis.text.x = element_text(angle=45))
+
+b=ggplot(aspettativa_m,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="Aspettativa di vita per gli uomini")+
+  theme(
+    axis.text.x = element_text(angle=45))
+ggplotly(a)
+ggplotly(b)
+```
+
+Appare chiara dai grafici la netta differenza tra aspettative di vita in Africa e negli altri continenti. Il trend è generalmente positivo, ad eccezione di alcuni Paesi africani come il Ruanda.
+
+```{r}
+fertility_rate=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="SP.DYN.TFRT.IN")
+fertility_rate=na.omit(fertility_rate)
+
+a=ggplot(fertility_rate,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="tasso di fertilit?")+
+  theme(
+    axis.text.x = element_text(angle=45))
+ggplotly(a) 
+```
+
+Nei Paesi europei, il tasso di fertilità sembra essere costante nel tempo, con valori comunque più bassi rispetto a quelli degli altri continenti, soprattutto quelli africani. Il trend per gli altri continenti è leggermente negativo.
+
+## Analisi livello di istruzione
+
+Consideriamo la percentuale di spese governative per l'educazione sul totale delle spese.
+
+```{r}
+ggplot(exp_ed,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="spese governative per educazione")+
+  theme(
+    axis.text.x = element_text(angle=45))
+
+#cerchiamo di fare chiarezza:
+best_education=exp_ed%>%
+     group_by(year) %>%
+     filter(row_number(desc(values))==1)
+
+a=ggplot(best_education,aes(year,values,group=country_name))+
+  geom_point(aes(color=continent))+
+  labs(
+    title="Paesi che spendono di più in educazione",
+    subtile="classifica per Paese")+
+  theme(
+    axis.text.x = element_text(angle=45))
+
+ggplotly(a)
+```
+
+Per ogni anno sono stati selezionati i Paesi che hanno sostenuto una percentuale di spese governative per l'educazione maggiore. Non si evince una netta prevalenza di un continente rispetto agli altri.  Può stupire vedere molti Paesi africani in cima alla classifica per la maggior percentuale di spese governative sostenute per l'educazione, ma per un'analisi più approfondita andrebbero considerati tutti i fattori di spesa e la situazione infrastrutturale, industriale ed economica dei Paesi.
+
+Andiamo ad analizzare il tasso di alfabetizzazione.
+```{r}
+alfa_rate=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="SE.ADT.LITR.ZS")
+alfa_rate=na.omit(alfa_rate)
+
+a=ggplot(alfa_rate,aes(year,values,group=country_name,color=continent))+
+  geom_point()+
+  labs(
+    title="Tasso di alfabetizzazione")+
+  theme(
+    axis.text.x = element_text(angle=45))
+ggplotly(a)
+
+```
+
+Come ci si poteva aspettare, i Paesi con un tasso peggiore di alfabetizzazione si trovano in Africa. Inoltre, per molti Stati i dati sono mancanti per periodi antecedenti il 2000.
+
+## Analisi infrastrutturale e ambientale
+
+Iniziamo andando a vedere la percentuale di persone che vivono in zone urbane o in zone rurali. 
+
+```{r}
+urba=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="SP.URB.TOTL.IN.ZS")
+urba=na.omit(urba)
+
+a=ggplot(urba,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="Popolazione urbana")+
+  theme(
+    axis.text.x = element_text(angle=45))
+ggplotly(a)
+```
+
+Siccome non è chiara la distribuzione di questo indicatore per continente, per agevolare l'analisi, si considerino i Paesi con un livello maggiore di urbanizzazione e quelli con il livello minore.
+
+```{r}
+urba1=urba%>%group_by(year)%>%filter(row_number(values)<5)
+urba2=urba%>%group_by(year)%>%filter(row_number(desc(values))<5)
+
+ggplot(urba1,aes(year,values))+
+  geom_point(aes(color=country_name))+
+  labs(
+    title="Paesi con minor urbanizzazione",
+    subtile="classifica per Paese")+
+  theme(
+    axis.text.x = element_text(angle=45))
+
+ggplot(urba2,aes(year,values))+
+  geom_point(aes(color=country_name))+
+  labs(
+    title="Paesi con maggior urbanizzazione",
+    subtile="classifica per Paese")+
+  theme(
+    axis.text.x = element_text(angle=45))
+
+```
+
+Consideriamo indicatori che possano misurare il livello di sviluppo tecnologico della popolazione, come utilizzo di internet a livello personale e utilizzo di smartphone.
+
+```{r}
+internet=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="IT.NET.USER.ZS")
+uso_cell=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="IT.CEL.SETS.P2")
+
+
+internet=na.omit(internet)
+uso_cell=na.omit(uso_cell)
+
+a=ggplot(internet,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="Utilizzo di internet",
+    subtitle="percentuale sulla popolazione")+
+  theme(
+    axis.text.x = element_text(angle=45))
+ggplotly(a)
+
+```
+
+È evidente come la crescita di utilizzo di internet abbia un andamento esponenziale per la maggior parte dei Paesi. Una crescita più lenta è stata registrata in Africa.
+
+```{r}
+a=ggplot(uso_cell,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="Utilizzo di smartphone")+
+  theme(
+    axis.text.x = element_text(angle=45))
+ggplotly(a)
+```
+
+Per quanto riguarda l'utilizzo di smartphone si possono fare considerazioni simili a quelle fatte per l'utilizzo di internet.
+
+Andiamo a indagare nel settore della Ricerca&Sviluppo considerando il numero di ricercatori per 100 persone.
+
+```{r}
+num_ricercatori=JobsData1%>%group_by(country_code)%>%filter(indicator_code=="SP.POP.SCIE.RD.P6")
+num_ricercatori=na.omit(num_ricercatori)
+
+a=ggplot(num_ricercatori,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="Numero di ricercatori")+
+  theme(
+    axis.text.x = element_text(angle=45))
+ggplotly(a)
+
+```
+
+
+Paesi europei, nord-americani, oceaniani e alcuni Paesi asiatici si posizionano ai primi posti. Vediamo quali sono:
+
+```{r}
+best_ricerca= num_ricercatori %>%
+     group_by(year) %>%
+     filter(values>7500)
+
+ggplot(num_ricercatori,aes(year,values))+
+  geom_point(aes(color=continent))+
+  labs(
+    title="Numero di ricercatori")+
+  theme(
+    axis.text.x = element_text(angle=45))+
+  ggrepel::geom_label_repel(aes(label = country_name), data = best_ricerca)
+```
+
+## Analisi HDI
+
+Abbiamo considerato aspetti economici, sanitari, di istruzione e di sviluppo scientifico-tecnologico. Consideriamo adesso un indicatore che ha lo scopo di misurare il livello di sviluppo umano di un Paese, l'indice HDI. Esso viene calcolato considerando il PIL pro capite, l'aspettativa di vita alla nascita e il livello di istruzione. Vediamo il suo andamento nel tempo. 
+
+```{r}
+HDI1=na.omit(HDI1)
+a=ggplot(HDI1,aes(year,values,group=country_name,color=continent))+
+  geom_line()+
+  labs(
+    title="HDI nel tempo")+
+  theme(
+    axis.text.x = element_text(angle=45))
+ggplotly(a)
+
+```
+
+Si nota un trend positivo di tale indicatore negli anni: ancora una volta i Paesi africani presentano valori molto bassi. In corrispondenza di valori piuttosto alti, invece, troviamo Paesi europei, asiatici e oceanici.
+
+```{r}
+
+best_and_worst_HDI=HDI1%>%group_by(year)%>%filter(row_number(values)==1|row_number(desc(values))==1)
+
+ggplot(HDI1,aes(year,values))+
+  geom_point(aes(color=continent))+
+  labs(
+    title="HDI")+
+  theme(
+    axis.text.x = element_text(angle=45),
+   axis.text.y = element_text(angle=45))+
+  ggrepel::geom_label_repel(aes(label = country_name), data = best_and_worst_HDI)
+```
+
+Norvegia e Australia sono i due Paesi con un HDI più alto, Nigeria, Mozambico e Ruanda, invece, presentano i più bassi livelli di questo indicatore. 
+
+
+# What about happiness?
+
+Cosa possiamo dire sulla felicità delle persone? Il World Happiness Report è un'indagine storica riguardante lo stato della felicit? globale, misurata su una scala da 1 a 10. Possiamo dire che i Paesi con un livello più alto di HDI sono anche quelli che sono più soddisfatti della loro vita? E riguardo agli altri indicatori?
+
+```{r}
+
+#i dati riguardanti la felicità sono disponibili a partire dal 2005
+life_ladder=WHR2016%>%group_by(year,continent)%>%select(country_name,year,life_ladder,continent)
+life_ladder=na.omit(life_ladder)
+b=ggplot(life_ladder,aes(year,life_ladder,group=country_name))+
+  geom_line(aes(color=continent))+
+  labs(title="Andamento della felicità nel tempo",
+       y="Life Ladder")
+
+a=ggplot(life_ladder,aes(x=continent,y=life_ladder,frame=year,group=country_name))+
+  geom_point()+
+  geom_boxplot()+
+    labs(
+      title="Distribuzione della felicità",
+      x="year",
+      y="Life Ladder"
+    )
+  
+ggplotly(a)
+ggplotly(b)
+
+  
+```
+
+```{r}
+best_and_worst_life_ladder=life_ladder%>%group_by(year)%>%filter(row_number(life_ladder)==1|row_number(desc(life_ladder))==1)
+ggplot(life_ladder,aes(year,life_ladder))+
+  geom_point(aes(color=continent))+
+  labs(
+    title="Happiness")+
+  theme(
+    axis.text.x = element_text(angle=45),
+   axis.text.y = element_text(angle=45))+
+  ggrepel::geom_label_repel(aes(label = country_name), data = best_and_worst_life_ladder)
+```
+
+I Paesi dell'Europa e dell'Nord-America, in media, hanno valutato in maniera più positiva il loro livello di felicità rispetto ai Paesi dell'Africa e dell'Asia. 
+
+# Modelli di regressione lineare
+
+Cerchiamo di capire se esiste una correlazione tra le variabili che abbiamo analizzato finora.
+
+```{r}
+mod_GDP<-GDP%>%group_by(continent,country_name)%>%nest()
+GDP_model<-function(df){
+  lm(values~year, data=df)
+}
+mod_GDP<-mod_GDP%>%mutate(model=map(data, GDP_model))
+
+mod_GDP<-mod_GDP%>%
+  mutate(data=map2(data,model,add_residuals))
+
+resids=unnest(mod_GDP, data)
+a=ggplot(resids,aes(x=year,y=resid))+
+  geom_line(aes(group=country_name,color=continent))+
+  geom_smooth()+
+  labs(title="Residui modello lineare logGDI")
+ggplotly(a)
+
+
+```
+
+Abbiamo costruito un modello lineare per il logaritmo del GDP pro capite e gli anni. Dal grafico dei residui si nota che il modello non è un buon modello per tutti i Paesi. Proviamo ad analizzare i residui per continente.
+
+```{r}
+resids%>%ggplot(aes(year,resid, group=country_name))+
+  geom_line()+
+  facet_wrap(~continent)
+```
+
+Il modello costruito è un buon modello per North America, Oceania e South America in quanto i residui si distribuiscono attorno allo 0. Invece per Africa e Asia il modello non si adatta bene ai dati, così come per alcuni Paesi Europei.
+
+```{r}
+mod_GDP<-mod_GDP%>%mutate(glance=map(model,glance))
+unnest(mod_GDP,glance)
+glance1=unnest(mod_GDP,glance, .drop=TRUE)
+glance1%>%arrange(r.squared)
+a=glance1%>%ggplot(aes(continent, r.squared,group=country_name))+
+  geom_point()+
+  labs(title="R Squared modello lineare logGDP")
+ggplotly(a)
+
+```
+
+Notiamo dei valori del coefficiente di correlazioine lineare piuttosto deludenti per Africa, Asia ed Europa;i valori migliorano per gli altri continent. 
+
+Passiamo ad analizzare il modello costruito per la variabile risposta HDI
+
+```{r}
+mod_HDI<-HDI1%>%group_by(continent,country_name,country_code)%>%nest()
+HDI_model<-function(df){
+  lm(values~year, data=df)
+}
+mod_HDI<-mod_HDI%>%mutate(model=map(data, HDI_model))
+
+mod_HDI<-mod_HDI%>%
+  mutate(data=map2(data,model,add_residuals))
+
+resids_HDI=unnest(mod_HDI, data)
+a=ggplot(resids_HDI,aes(x=year,y=resid))+
+  geom_line(aes(group=country_name,color=continent))+
+  geom_smooth()+
+  labs(title="Residui modello lineare HDI")
+ggplotly(a)
+```
+
+Anche in questo caso è difficile accettare l'ipotesi di relazione lineare tra la variabile year e HDI per tutti i Paesi. Analizziamo i residui per continente: 
+
+```{r}
+resids_HDI%>%ggplot(aes(year,resid, group=country_name))+
+  geom_line()+
+  facet_wrap(~continent)
+```
+
+Possiamo ipotizzare che il modello lineare sia un buon modello per il South America e Oceania, ma non per gli altri continenti.
+
+```{r}
+mod_HDI<-mod_HDI%>%mutate(glance=map(model,glance))
+unnest(mod_GDP,glance)
+glance2=unnest(mod_HDI,glance, .drop=TRUE)
+
+glance2%>%arrange(r.squared)
+a=glance2%>%ggplot(aes(continent, r.squared,group=country_name))+
+  geom_point()+
+  labs(
+    title="R Squared modello lineare HDI"
+  )
+
+ggplotly(a)
+
+```
+I valori della statistica R^2 mostrano dei possibili miglioramenti per il modello, soprattutto in l'Africa. 
+
+Infine ? interessante vedere se l'andamento della felicit? pu? essere spiegato da un modello lineare rispetto agli anni. 
+
+```{r}
+mod_happy<-life_ladder%>%group_by(continent,country_name)%>%nest()
+happy_model<-function(df){
+  lm(life_ladder~year, data=df)
+}
+mod_happy<-mod_happy%>%mutate(model=map(data, happy_model))
+
+mod_happy<-mod_happy%>%
+  mutate(data=map2(data,model,add_residuals))
+
+resids_happy=unnest(mod_happy, data)
+a=ggplot(resids_happy,aes(x=year,y=resid))+
+  geom_line(aes(group=country_name,color=continent))+
+  geom_smooth()+
+  labs(title="Residui modello lineare Happiness")
+ggplotly(a)
+```
+
+Non sembra essere un buon modello perchè i residui sono molto dispersi.
+
+```{r}
+resids_happy%>%ggplot(aes(year,resid, group=country_name))+
+  geom_line()+
+  facet_wrap(~continent)
+
+glance3=mod_happy%>%mutate(glance=map(model,glance))%>%
+  unnest(glance, .drop = TRUE)
+group_by(glance3,continent)%>%
+  summarise(quality=mean(r.squared))%>%
+  arrange(quality)
+
+glance3%>%arrange(r.squared)
+a=glance3%>%ggplot(aes(continent, r.squared,group=country_name))+
+  geom_point()+
+  labs(
+    title="R Squared modello lineare Happiness"
+  )
+
+ggplotly(a)
+```
+
+# Correlazioni
+
+Fissiamo l'anno di calendario 2015 e indaghiamo su eventuali correlazioni tra gli indicatori.
+
+```{r}
+data2015=WHR2016%>%left_join(HDI1)%>%rename("HDI"="values")%>%filter(year=="2015")%>%select(-year)
+data2015=na.omit(data2015)
+
+num_data2015=data2015%>%select(-country_code,-country_name,-continent)
+correlazione=cor(num_data2015)
+corrplot(correlazione,method="ellipse",order="hclust")
+
+```
+
+Sono presenti delle correlazioni tra le variabili analizzate, positive tra life_ladder, HDI, generosità, freedom e positive affects, e negative tra negative affects e le altre variabili.
+QUantifichiamo numericamente le correlazioni:
+
+```{r}
+corrplot(correlazione,method="number")
+```
+
+Si evince una buona correlazione positiva tra felicità e HDI, studiamo questa relazione nel dettaglio:
+```{r}
+a=ggplot(data2015,aes(x=HDI,y=life_ladder,color=continent,group=country_name))+
+  geom_point()+
+  labs(title="Covariazione HDI e felicit?",
+       y="felicit?")
+ggplotly(a)
+```
+
+Si può individuare un trend lineare: all'aumentare di HDI aumenta anche la felicit? e viceversa. I Paesi africani si posizionano in basso a sinistra, in corrispondenza di valori bassi di entrambi gli indicatori. In posizioni intermedie troviamo Paesi nord-americani, asiatici e sud-americani. In alto a destra, invece, in corrispondenza di valori alti per entrambi gli indicatori, si posizionano soprattutto Paesi europei.
+Si nota come i Paesi del Sud America presentino valori di felicità superiori alla media e alla media dei Paesi europei e dei Paesi nord-americani.
+
+```{r}
+
+data2015%>%group_by(continent)%>%summarise(felix_media=mean(life_ladder))
+
+```
+
+
+```{r}
+a=ggplot(data2015,aes(x=continent,y=life_ladder,group=country_name))+
+  geom_point()+
+  geom_boxplot()+
+  labs(
+    title="Distribuzione della felicità per continente"
+  )
+
+ggplotly(a)
+```
+
+Consideriamo altri indicatori:
+
+* generosità: calcolato in base alle donazioni in denaro effettuate
+
+* freedom: calcolato in base alla possibilità di compiere delle scelte riguardanti la propria vita
+
+* positive affects: indicatore calcolato in base alle risposte ottenute alle domande seguenti:
+
++ sei stato felice nella giornata di ieri?
+
++ hai sorriso o ti sei fatto una risata ieri?
+
++ ti sei divertito ieri?
+
+* negative affects: indicatore calcolato in base alle risposte ottenute alle seguenti domande:
+
++ hai avuto delle preoccupazioni nella giornata di ieri?
+
++ ieri sei stato triste?
+
++ ieri ti sei arrabbiato?
+
+```{r}
+a=ggplot(data2015,aes(x=continent,y=generosity,group=country_name))+
+  geom_point()+
+  geom_boxplot()+
+  labs(
+    title="Distribuzione della generosità per continente"
+  )
+
+ggplotly(a)
+```
+
+I più generosi sono in Indonesia, i meno generosi in Grecia e Lituania.
+
+```{r}
+
+a=ggplot(data2015,aes(x=continent,y=positive_affects,group=country_name))+
+  geom_point()+
+  geom_boxplot()+
+  labs(
+    title="Distribuzione di emozioni positive"
+  )
+ggplotly(a)
+
+b=ggplot(data2015,aes(x=continent,y=negative_affects))+
+  geom_point()+
+  geom_boxplot()+
+  labs(title="Distribuzione di emozioni negative")
+
+ggplotly(b)
+```
+
+Per trovare persone sorridenti è bene visitare Thailandia e Uruguay. I più tristi e arrabbiati sembrano essere gli Iraqueni. 
+
+```{r}
+
+a=ggplot(data2015,aes(x=continent,y=freedom,group=country_name))+
+  geom_point()+
+  geom_boxplot()+
+  labs(title="Distribuzione di sentimento di libertà")
+    
+ggplotly(a)
+
+
+```
+
+È interessante notare che nonostante i risultati disastrosi osservati per gli altri indicatori, la distribuzione di emozioni positive e di libertà nei Paesi africani non è particolarmente scoraggiante. 
+
+Costruisco un modello lineare per life ladder:
+```{r}
+mod=lm(data=num_data2015,life_ladder~.)
+summary(mod)
+```
+
+Le variabili che risultano statisticamente significative sono positive_affects e HDI, quindi eliminiamo le altre dal modello.
+
+```{r}
+mod1=lm(data=num_data2015, life_ladder~HDI*positive_affects)
+summary(mod1)
+```
+Il valore R-squared è migliorato. 
+
+Analizziamo i residui:
+
+```{r}
+num_data2015=num_data2015%>%add_residuals(mod1)
+ggplot(num_data2015,aes(x=life_ladder,y=resid))+
+  geom_point()+
+  labs(title="Analisi dei residui",
+       x="life ladder",
+       y="residui")
+```
+
+Dal grafico possiamo dedurre che il modello lineare non è quello più adatto a spiegare la relazione tra le variabili considerate poichè si scorge un leggero trend positivo tra i residui e la variabile life ladder. Infatti, per valori molto bassi di life ladder i residui sono negativi, per valori molto alti sono invece quasi tutti positivi. Andrebbero presi in considerazione modelli di tipo diverso. 
